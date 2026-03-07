@@ -9,12 +9,14 @@ func requestPairingApproval(deviceName: String?, ipAddress: String?, country: St
                 continuation.resume(returning: false)
                 return
             }
-            controller.handleApprovalRequest(
-                deviceName: deviceName,
-                ipAddress: ipAddress,
-                country: country,
-                continuation: continuation
-            )
+            MainActor.assumeIsolated {
+                controller.handleApprovalRequest(
+                    deviceName: deviceName,
+                    ipAddress: ipAddress,
+                    country: country,
+                    continuation: continuation
+                )
+            }
         }
     }
 }
