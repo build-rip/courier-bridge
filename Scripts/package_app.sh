@@ -24,7 +24,7 @@ ZIP_PATH="$OUTPUT_DIR/${ASSET_PREFIX}${VERSION_NAME}-${BUILD_NUMBER}${ASSET_SUFF
 
 mkdir -p "$OUTPUT_DIR"
 
-swift build -c "$BUILD_CONFIGURATION"
+swift build -c "$BUILD_CONFIGURATION" --product "$PRODUCT_NAME"
 
 if [[ ! -f "$EXECUTABLE_PATH" ]]; then
   echo "Expected executable not found at $EXECUTABLE_PATH" >&2

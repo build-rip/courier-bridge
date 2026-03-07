@@ -5,12 +5,46 @@ on:
   push:
     branches: main
 
+concurrency:
+  group: publish-prerelease-bridge-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
 jobs:
-  build-and-release:
+  validate:
     runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Cache SwiftPM artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/.swiftpm
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('Package.swift', 'Package.resolved', 'Scripts/package_app.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-
+
+      - name: Validate bridge tests
+        run: swift test
+
+  build-package:
+    runs-on: macos-15
+    timeout-minutes: 30
+    outputs:
+      tag_name: ${{ steps.meta.outputs.tag_name }}
+      release_name: ${{ steps.meta.outputs.release_name }}
+      asset_name: ${{ steps.meta.outputs.asset_name }}
 
     steps:
       - name: Check out repository
@@ -75,6 +109,28 @@ jobs:
           ./Scripts/package_app.sh
           mv "$RUNNER_TEMP/dist"/Courier-Bridge-${{ steps.meta.outputs.version_name }}-${{ steps.meta.outputs.build_number }}.zip "$RUNNER_TEMP/dist/${{ steps.meta.outputs.asset_name }}"
 
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: courier-bridge-release-zip
+          path: ${{ runner.temp }}/dist/${{ steps.meta.outputs.asset_name }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    runs-on: macos-15
+    timeout-minutes: 30
+    needs:
+      - validate
+      - build-package
+
+    steps:
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: courier-bridge-release-zip
+          path: ${{ runner.temp }}/dist
+
       - name: Decode notary API key
         env:
           APPLE_NOTARY_API_KEY_B64: ${{ secrets.APPLE_NOTARY_API_KEY_B64 }}
@@ -95,8 +151,9 @@ jobs:
             echo "Notary credentials are incomplete; skipping notarization."
             exit 0
           fi
+          ZIP_PATH="$RUNNER_TEMP/dist/${{ needs.build-package.outputs.asset_name }}"
+          unzip -q "$ZIP_PATH" -d "$RUNNER_TEMP/dist"
           APP_PATH="$RUNNER_TEMP/dist/Courier Bridge.app"
-          ZIP_PATH="$RUNNER_TEMP/dist/${{ steps.meta.outputs.asset_name }}"
           xcrun notarytool submit "$ZIP_PATH" --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$APPLE_NOTARY_KEY_ID" --issuer "$APPLE_NOTARY_ISSUER_ID" --wait
           xcrun stapler staple "$APP_PATH"
           rm -f "$ZIP_PATH"
@@ -105,10 +162,10 @@ jobs:
       - name: Publish prerelease
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.tag_name }}
-          name: ${{ steps.meta.outputs.release_name }}
+          tag_name: ${{ needs.build-package.outputs.tag_name }}
+          name: ${{ needs.build-package.outputs.release_name }}
           prerelease: true
-          files: ${{ runner.temp }}/dist/${{ steps.meta.outputs.asset_name }}
+          files: ${{ runner.temp }}/dist/${{ needs.build-package.outputs.asset_name }}
           body: |
             Automated prerelease bridge build for `${{ github.sha }}`.
 

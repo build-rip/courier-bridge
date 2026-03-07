@@ -28,6 +28,7 @@ let package = Package(
                 "CourierCore",
                 .product(name: "Vapor", package: "vapor"),
                 .product(name: "JWT", package: "jwt"),
+                .product(name: "JWTKit", package: "jwt-kit"),
             ],
             resources: [
                 .copy("Public"),
