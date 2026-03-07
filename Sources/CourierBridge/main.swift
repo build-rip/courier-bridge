@@ -3,10 +3,29 @@ import Vapor
 
 nonisolated(unsafe) var statusBarController: StatusBarController?
 
+let preflightIssues = await MainActor.run {
+    AppLaunchPreflight.run()
+}
+
+let shouldContinueLaunch = await MainActor.run {
+    AppLaunchPreflight.presentIfNeeded(preflightIssues)
+}
+
+guard shouldContinueLaunch else {
+    exit(1)
+}
+
 var env = try Environment.detect()
 let app = try await Application.make(env)
 
-try await configure(app)
+do {
+    try await configure(app)
+} catch {
+    await MainActor.run {
+        AppLaunchPreflight.presentLaunchFailure(error)
+    }
+    exit(1)
+}
 
 // Set activation policy before creating UI elements
 NSApplication.shared.setActivationPolicy(.accessory)
