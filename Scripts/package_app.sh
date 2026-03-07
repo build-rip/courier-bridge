@@ -40,6 +40,9 @@ chmod +x "$MACOS_PATH/$APP_NAME"
 shopt -s nullglob
 for bundle in "$BUILD_DIR"/*.bundle; do
   cp -R "$bundle" "$RESOURCES_PATH/"
+  if [[ "$(basename "$bundle")" == "${PRODUCT_NAME}_CourierBridge.bundle" ]]; then
+    cp -R "$bundle" "$APP_BUNDLE_PATH/"
+  fi
 done
 shopt -u nullglob
 
