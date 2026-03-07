@@ -74,8 +74,8 @@ func configure(_ app: Application) async throws {
     await app.jwt.keys.add(hmac: HMACKey(from: secret), digestAlgorithm: .sha256)
 
     // Serve static files
-    if let resourcePath = Bundle.module.resourcePath {
-        app.middleware.use(FileMiddleware(publicDirectory: resourcePath + "/Public"))
+    if let publicResourcesURL = BridgeAppConfiguration.publicResourcesURL {
+        app.middleware.use(FileMiddleware(publicDirectory: publicResourcesURL.path))
     }
 
     // Register routes

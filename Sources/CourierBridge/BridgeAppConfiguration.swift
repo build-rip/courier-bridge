@@ -25,6 +25,27 @@ enum BridgeAppConfiguration {
         Bundle.main.executableURL
     }
 
+    static var resourceBundleURL: URL? {
+        let bundleName = "courier-bridge_CourierBridge.bundle"
+        if let resourceURL = Bundle.main.resourceURL {
+            let bundledURL = resourceURL.appendingPathComponent(bundleName)
+            if FileManager.default.fileExists(atPath: bundledURL.path) {
+                return bundledURL
+            }
+        }
+
+        let fallbackURL = Bundle.main.bundleURL.appendingPathComponent(bundleName)
+        if FileManager.default.fileExists(atPath: fallbackURL.path) {
+            return fallbackURL
+        }
+
+        return nil
+    }
+
+    static var publicResourcesURL: URL? {
+        resourceBundleURL?.appendingPathComponent("Public", isDirectory: true)
+    }
+
     private static func stringValue(for key: String, default defaultValue: String) -> String {
         Bundle.main.object(forInfoDictionaryKey: key) as? String ?? defaultValue
     }
