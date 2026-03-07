@@ -11,7 +11,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.10.0"),
         .package(url: "https://github.com/vapor/vapor.git", from: "4.121.0"),
-        .package(url: "https://github.com/vapor/jwt.git", from: "5.0.0"),
+        .package(url: "https://github.com/vapor/jwt.git", exact: "5.0.0"),
         .package(url: "https://github.com/apple/swift-testing.git", from: "0.12.0"),
     ],
     targets: [
