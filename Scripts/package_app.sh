@@ -20,6 +20,10 @@ APP_BUNDLE_PATH="$OUTPUT_DIR/$APP_NAME.app"
 CONTENTS_PATH="$APP_BUNDLE_PATH/Contents"
 MACOS_PATH="$CONTENTS_PATH/MacOS"
 RESOURCES_PATH="$CONTENTS_PATH/Resources"
+SOURCE_ICON_PATH="$ROOT_DIR/icon.svg"
+ICONSET_PATH="$OUTPUT_DIR/AppIcon.iconset"
+ICON_PNG_PATH="$OUTPUT_DIR/icon.png"
+ICON_ICNS_PATH="$OUTPUT_DIR/AppIcon.icns"
 ZIP_PATH="$OUTPUT_DIR/${ASSET_PREFIX}${VERSION_NAME}-${BUILD_NUMBER}${ASSET_SUFFIX}"
 
 mkdir -p "$OUTPUT_DIR"
@@ -31,7 +35,12 @@ if [[ ! -f "$EXECUTABLE_PATH" ]]; then
   exit 1
 fi
 
-rm -rf "$APP_BUNDLE_PATH" "$ZIP_PATH"
+if [[ ! -f "$SOURCE_ICON_PATH" ]]; then
+  echo "Expected source icon not found at $SOURCE_ICON_PATH" >&2
+  exit 1
+fi
+
+rm -rf "$APP_BUNDLE_PATH" "$ZIP_PATH" "$ICONSET_PATH" "$ICON_PNG_PATH" "$ICON_ICNS_PATH"
 mkdir -p "$MACOS_PATH" "$RESOURCES_PATH"
 
 cp "$EXECUTABLE_PATH" "$MACOS_PATH/$APP_NAME"
@@ -42,6 +51,25 @@ for bundle in "$BUILD_DIR"/*.bundle; do
   cp -R "$bundle" "$RESOURCES_PATH/"
 done
 shopt -u nullglob
+
+qlmanage -t -s 1024 -o "$OUTPUT_DIR" "$SOURCE_ICON_PATH" >/dev/null
+mv "$OUTPUT_DIR/$(basename "$SOURCE_ICON_PATH").png" "$ICON_PNG_PATH"
+
+mkdir -p "$ICONSET_PATH"
+sips -z 16 16 "$ICON_PNG_PATH" --out "$ICONSET_PATH/icon_16x16.png" >/dev/null
+sips -z 32 32 "$ICON_PNG_PATH" --out "$ICONSET_PATH/icon_16x16@2x.png" >/dev/null
+sips -z 32 32 "$ICON_PNG_PATH" --out "$ICONSET_PATH/icon_32x32.png" >/dev/null
+sips -z 64 64 "$ICON_PNG_PATH" --out "$ICONSET_PATH/icon_32x32@2x.png" >/dev/null
+sips -z 128 128 "$ICON_PNG_PATH" --out "$ICONSET_PATH/icon_128x128.png" >/dev/null
+sips -z 256 256 "$ICON_PNG_PATH" --out "$ICONSET_PATH/icon_128x128@2x.png" >/dev/null
+sips -z 256 256 "$ICON_PNG_PATH" --out "$ICONSET_PATH/icon_256x256.png" >/dev/null
+sips -z 512 512 "$ICON_PNG_PATH" --out "$ICONSET_PATH/icon_256x256@2x.png" >/dev/null
+sips -z 512 512 "$ICON_PNG_PATH" --out "$ICONSET_PATH/icon_512x512.png" >/dev/null
+cp "$ICON_PNG_PATH" "$ICONSET_PATH/icon_512x512@2x.png"
+iconutil -c icns "$ICONSET_PATH" -o "$ICON_ICNS_PATH"
+
+cp "$SOURCE_ICON_PATH" "$RESOURCES_PATH/icon.svg"
+cp "$ICON_ICNS_PATH" "$RESOURCES_PATH/AppIcon.icns"
 
 cat > "$CONTENTS_PATH/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -54,6 +82,8 @@ cat > "$CONTENTS_PATH/Info.plist" <<EOF
     <string>$APP_NAME</string>
     <key>CFBundleIdentifier</key>
     <string>$BUNDLE_ID</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon.icns</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

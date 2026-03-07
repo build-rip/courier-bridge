@@ -230,8 +230,8 @@ final class StatusBarController: NSObject {
 
     private func setupMenuBarIcon() {
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "message.fill", accessibilityDescription: "Courier Bridge")
-            button.image?.isTemplate = true
+            button.image = AppIcon.statusBarImage() ?? NSImage(systemSymbolName: "message.fill", accessibilityDescription: "Courier Bridge")
+            button.image?.isTemplate = false
         }
     }
 

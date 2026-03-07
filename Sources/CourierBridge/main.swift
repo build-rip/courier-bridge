@@ -29,6 +29,7 @@ do {
 
 // Set activation policy before creating UI elements
 NSApplication.shared.setActivationPolicy(.accessory)
+NSApplication.shared.applicationIconImage = AppIcon.applicationImage()
 
 let launchAtLoginManager = LaunchAtLoginManager()
 try? launchAtLoginManager.configureForCurrentLaunch()
