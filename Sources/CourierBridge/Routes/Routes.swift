@@ -14,7 +14,7 @@ func registerRoutes(_ app: Application) throws {
     deviceRoutes(protected)
     adminRoutes(protected)
 
-    // WebSocket route (auth via query param)
+    // WebSocket route (requires auth token in query param)
     app.webSocket("ws") { req, ws in
         await req.appState.wsController.connect(req: req, ws: ws)
     }

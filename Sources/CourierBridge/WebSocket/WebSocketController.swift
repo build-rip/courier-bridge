@@ -15,7 +15,19 @@ actor WebSocketController {
         clients.count
     }
 
-    func connect(req: Request, ws: WebSocket) {
+    func connect(req: Request, ws: WebSocket) async {
+        guard let token = req.query[String.self, at: "token"] else {
+            try? await ws.close(code: .policyViolation)
+            return
+        }
+
+        do {
+            let _ = try await req.jwt.verify(token, as: AccessTokenPayload.self)
+        } catch {
+            try? await ws.close(code: .policyViolation)
+            return
+        }
+
         let id = UUID()
         clients[id] = ws
 
@@ -25,17 +37,6 @@ actor WebSocketController {
             Task { await self?.disconnect(id: id) }
         }
 
-        // Optionally validate JWT from query parameter
-        if let token = req.query[String.self, at: "token"] {
-            Task {
-                do {
-                    let _ = try await req.jwt.verify(token, as: AccessTokenPayload.self)
-                } catch {
-                    try? await ws.close(code: .policyViolation)
-                    self.disconnect(id: id)
-                }
-            }
-        }
     }
 
     func disconnect(id: UUID) {

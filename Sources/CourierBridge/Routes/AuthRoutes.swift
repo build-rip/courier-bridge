@@ -43,14 +43,8 @@ struct DeviceResponse: Content {
 }
 
 struct StatusResponse: Content {
-    let status: String
-    let uptime: TimeInterval
-    let messageCount: Int
-    let connectedClients: Int
-    let lastChecked: Date
+    let online: Bool
 }
-
-private let startTime = Date()
 
 func authRoutes(_ app: RoutesBuilder) {
     // POST /api/pair - exchange pairing code for refresh token
@@ -107,18 +101,9 @@ func authRoutes(_ app: RoutesBuilder) {
         return TokenResponse(accessToken: token, expiresIn: expiresIn)
     }
 
-    // GET /api/status - bridge health (public)
-    app.get("status") { req -> StatusResponse in
-        let count = try req.appState.queries.messageCount()
-        let clients = await req.appState.wsController.clientCount
-
-        return StatusResponse(
-            status: "ok",
-            uptime: Date().timeIntervalSince(startTime),
-            messageCount: count,
-            connectedClients: clients,
-            lastChecked: Date()
-        )
+    // GET /api/status - minimal public health check
+    app.get("status") { _ -> StatusResponse in
+        return StatusResponse(online: true)
     }
 
 }
