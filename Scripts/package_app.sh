@@ -29,7 +29,8 @@ APP_BUNDLE_PATH="$OUTPUT_DIR/$APP_NAME.app"
 CONTENTS_PATH="$APP_BUNDLE_PATH/Contents"
 MACOS_PATH="$CONTENTS_PATH/MacOS"
 RESOURCES_PATH="$CONTENTS_PATH/Resources"
-SOURCE_ICON_PATH="$ROOT_DIR/icon.svg"
+SOURCE_ICON_PATH="$ROOT_DIR/assets/icon.svg"
+MENU_BAR_ICON_PATH="$ROOT_DIR/assets/menu-bar-icon.svg"
 ICONSET_PATH="$OUTPUT_DIR/AppIcon.iconset"
 ICON_PNG_PATH="$OUTPUT_DIR/icon.png"
 ICON_ICNS_PATH="$OUTPUT_DIR/AppIcon.icns"
@@ -51,6 +52,11 @@ fi
 
 if [[ ! -f "$SOURCE_ICON_PATH" ]]; then
   echo "Expected source icon not found at $SOURCE_ICON_PATH" >&2
+  exit 1
+fi
+
+if [[ ! -f "$MENU_BAR_ICON_PATH" ]]; then
+  echo "Expected menu bar icon not found at $MENU_BAR_ICON_PATH" >&2
   exit 1
 fi
 
@@ -83,6 +89,7 @@ cp "$ICON_PNG_PATH" "$ICONSET_PATH/icon_512x512@2x.png"
 iconutil -c icns "$ICONSET_PATH" -o "$ICON_ICNS_PATH"
 
 cp "$SOURCE_ICON_PATH" "$RESOURCES_PATH/icon.svg"
+cp "$MENU_BAR_ICON_PATH" "$RESOURCES_PATH/menu-bar-icon.svg"
 cp "$ICON_ICNS_PATH" "$RESOURCES_PATH/AppIcon.icns"
 
 cat > "$CONTENTS_PATH/Info.plist" <<EOF

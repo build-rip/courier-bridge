@@ -142,6 +142,19 @@ struct AppLaunchPreflight {
         }
     }
 
+    @MainActor
+    final class PermissionPromptWindowDelegate: NSObject, NSWindowDelegate {
+        private let requestQuit: () -> Void
+
+        init(requestQuit: @escaping () -> Void) {
+            self.requestQuit = requestQuit
+        }
+
+        func windowWillClose(_ notification: Notification) {
+            requestQuit()
+        }
+    }
+
     struct PermissionPromptView: View {
         @ObservedObject var model: PermissionPromptModel
         let hasBlockingChecks: Bool
@@ -233,6 +246,19 @@ struct AppLaunchPreflight {
         alert.messageText = "Courier Bridge cannot start yet"
         alert.informativeText = ""
 
+        var didRequestQuit = false
+        let windowDelegate = PermissionPromptWindowDelegate {
+            didRequestQuit = true
+            alert.window.orderOut(nil)
+            NSApp.stopModal(withCode: .abort)
+        }
+
+        let alertWindow = alert.window
+        alertWindow.level = .floating
+        alertWindow.isReleasedWhenClosed = false
+        alertWindow.delegate = windowDelegate
+        alertWindow.styleMask.insert(.closable)
+
         var didResolvePermissions = false
         let promptModel = PermissionPromptModel(checks: checks) {
             didResolvePermissions = true
@@ -252,9 +278,14 @@ struct AppLaunchPreflight {
 
         let response = alert.runModal()
         promptModel.stopMonitoring()
+        alertWindow.delegate = nil
 
         if didResolvePermissions {
             return .continueLaunch
+        }
+
+        if didRequestQuit {
+            return .quit
         }
 
         _ = response

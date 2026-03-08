@@ -4,6 +4,131 @@ import CoreImage
 
 // MARK: - SwiftUI Views
 
+private let bridgeURLDefaultsKey = "bridgePublicURL"
+private let cloudflareTunnelDocsURL = URL(string: "https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/create-local-tunnel/")!
+
+private struct BridgeStatusCheckResponse: Decodable {
+    let online: Bool
+}
+
+private enum BridgeURLValidationState {
+    case idle
+    case testing
+    case success(String)
+    case failure(String)
+}
+
+private enum BridgeURLValidationError: LocalizedError {
+    case empty
+    case invalid
+    case unsupportedScheme
+    case unexpectedStatus(Int)
+    case invalidResponse
+    case offlineBridge
+
+    var errorDescription: String? {
+        switch self {
+        case .empty:
+            return "Enter the public URL for this bridge first."
+        case .invalid:
+            return "Enter a valid bridge URL, including http:// or https://."
+        case .unsupportedScheme:
+            return "The bridge URL must use http:// or https://."
+        case .unexpectedStatus(let statusCode):
+            return "The bridge responded with HTTP \(statusCode) instead of a healthy status response."
+        case .invalidResponse:
+            return "The bridge returned an unexpected response while checking /api/status."
+        case .offlineBridge:
+            return "The bridge reported that it is offline."
+        }
+    }
+}
+
+private func normalizedBridgeURLString(_ rawValue: String) throws -> String {
+    let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { throw BridgeURLValidationError.empty }
+    guard var components = URLComponents(string: trimmed), components.host != nil else {
+        throw BridgeURLValidationError.invalid
+    }
+
+    guard let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+        throw BridgeURLValidationError.unsupportedScheme
+    }
+
+    components.query = nil
+    components.fragment = nil
+
+    if components.path.isEmpty {
+        components.path = ""
+    } else if components.path != "/" {
+        components.path = components.path.replacingOccurrences(of: #"/+$"#, with: "", options: .regularExpression)
+    }
+
+    guard let url = components.url else {
+        throw BridgeURLValidationError.invalid
+    }
+
+    let absoluteString = url.absoluteString
+    if absoluteString.hasSuffix("/") && components.path.isEmpty {
+        return String(absoluteString.dropLast())
+    }
+
+    return absoluteString
+}
+
+private func bridgeStatusURL(from rawValue: String) throws -> URL {
+    let normalized = try normalizedBridgeURLString(rawValue)
+    guard var components = URLComponents(string: normalized) else {
+        throw BridgeURLValidationError.invalid
+    }
+
+    let basePath = components.path == "/" ? "" : components.path
+    components.path = basePath + "/api/status"
+    components.query = nil
+    components.fragment = nil
+
+    guard let url = components.url else {
+        throw BridgeURLValidationError.invalid
+    }
+
+    return url
+}
+
+private func validateBridgeURL(_ rawValue: String) async throws -> String {
+    let normalized = try normalizedBridgeURLString(rawValue)
+    let url = try bridgeStatusURL(from: normalized)
+
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 10
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.timeoutIntervalForRequest = 10
+    configuration.timeoutIntervalForResource = 10
+
+    let session = URLSession(configuration: configuration)
+    let (data, response) = try await session.data(for: request)
+
+    guard let httpResponse = response as? HTTPURLResponse else {
+        throw BridgeURLValidationError.invalidResponse
+    }
+
+    guard 200..<300 ~= httpResponse.statusCode else {
+        throw BridgeURLValidationError.unexpectedStatus(httpResponse.statusCode)
+    }
+
+    let decoded = try? JSONDecoder().decode(BridgeStatusCheckResponse.self, from: data)
+    guard let decoded else {
+        throw BridgeURLValidationError.invalidResponse
+    }
+
+    guard decoded.online else {
+        throw BridgeURLValidationError.offlineBridge
+    }
+
+    return normalized
+}
+
 @Observable
 private class PairingState {
     var code: String = ""
@@ -16,6 +141,143 @@ private class PairingState {
         let deviceName: String?
         let ipAddress: String?
         let country: String?
+    }
+}
+
+@Observable
+private class BridgeURLSettingsState {
+    var bridgeURL: String
+    var validationState: BridgeURLValidationState = .idle
+    var lastValidatedURL: String?
+
+    init(bridgeURL: String) {
+        self.bridgeURL = bridgeURL
+    }
+
+    var trimmedBridgeURL: String {
+        bridgeURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var canTestConnection: Bool {
+        !trimmedBridgeURL.isEmpty && !isTesting
+    }
+
+    var canSaveAndContinue: Bool {
+        lastValidatedURL == trimmedBridgeURL && !isTesting
+    }
+
+    var isTesting: Bool {
+        if case .testing = validationState {
+            return true
+        }
+        return false
+    }
+
+    func updateBridgeURL(_ newValue: String) {
+        bridgeURL = newValue
+
+        if lastValidatedURL != newValue.trimmingCharacters(in: .whitespacesAndNewlines) {
+            lastValidatedURL = nil
+            validationState = .idle
+        }
+    }
+}
+
+private struct BridgeURLSettingsView: View {
+    let state: BridgeURLSettingsState
+    let onTestConnection: () -> Void
+    let onSaveAndContinue: () -> Void
+    let onCancel: () -> Void
+
+    private var validationMessage: String? {
+        switch state.validationState {
+        case .idle:
+            return nil
+        case .testing:
+            return "Checking that the bridge can reach itself at that public URL..."
+        case .success(let message), .failure(let message):
+            return message
+        }
+    }
+
+    private var validationColor: Color {
+        switch state.validationState {
+        case .idle:
+            return .secondary
+        case .testing:
+            return .secondary
+        case .success:
+            return .green
+        case .failure:
+            return .red
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Bridge Address")
+                .font(.title2.weight(.semibold))
+
+            Text("Before pairing a device, this bridge needs a reliable public address that your phone can reach.")
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("1. The bridge needs a reliable address.")
+                Text("2. Pairing is protected with approval and short-lived codes, so publishing the bridge is safe when you control the URL.")
+                Text("3. Tailscale is a good option if you already use it, but you do not need to learn Tailscale just to get started.")
+                Text("4. Cloudflare Tunnel is another option for exposing a local bridge securely.")
+            }
+            .font(.body)
+
+            HStack(spacing: 8) {
+                Text("If you want to use Cloudflare Tunnel, follow Cloudflare's guide for serving a local app through a tunnel.")
+                    .foregroundStyle(.secondary)
+                Link("More Info", destination: cloudflareTunnelDocsURL)
+            }
+            .font(.subheadline)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Public bridge URL")
+                    .font(.headline)
+
+                TextField(
+                    "https://bridge.example.com",
+                    text: Binding(
+                        get: { state.bridgeURL },
+                        set: { state.updateBridgeURL($0) }
+                    )
+                )
+                .textFieldStyle(.roundedBorder)
+
+                Text("We will request /api/status at the public URL and make sure the bridge reports a healthy status.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if let validationMessage {
+                    Text(validationMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(validationColor)
+                }
+            }
+
+            Spacer()
+
+            HStack {
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                Button(state.isTesting ? "Testing..." : "Test Connection", action: onTestConnection)
+                    .disabled(!state.canTestConnection)
+
+                Button("Save and Continue", action: onSaveAndContinue)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!state.canSaveAndContinue)
+            }
+        }
+        .padding(24)
+        .frame(width: 540, height: 420)
     }
 }
 
@@ -209,8 +471,10 @@ final class StatusBarController: NSObject {
     private var statusTimer: Timer?
     private var pairingWindow: NSWindow?
     private var pairingState: PairingState?
+    private var bridgeURLSettingsState: BridgeURLSettingsState?
     private var expiryTimer: Timer?
     private var approvalContinuation: CheckedContinuation<Bool, Never>?
+    private let defaults = UserDefaults.standard
 
     init(appState: AppState, launchAtLoginManager: LaunchAtLoginManager, updater: GitHubUpdater) {
         self.appState = appState
@@ -260,7 +524,7 @@ final class StatusBarController: NSObject {
 
         menu.addItem(.separator())
 
-        let pairItem = NSMenuItem(title: "Pair a New Device", action: #selector(generatePairingCode), keyEquivalent: "")
+        let pairItem = NSMenuItem(title: "Pair a New Device", action: #selector(beginPairingFlow), keyEquivalent: "")
         pairItem.target = self
         menu.addItem(pairItem)
 
@@ -369,7 +633,69 @@ final class StatusBarController: NSObject {
 
     // MARK: - Pairing
 
-    @objc private func generatePairingCode() {
+    @objc private func beginPairingFlow() {
+        showBridgeURLSettings()
+    }
+
+    private func showBridgeURLSettings() {
+        closePairingWindow()
+
+        let state = BridgeURLSettingsState(bridgeURL: currentBridgeURL() ?? "")
+        bridgeURLSettingsState = state
+
+        let hostingView = NSHostingView(rootView: BridgeURLSettingsView(
+            state: state,
+            onTestConnection: { [weak self] in self?.testBridgeURL() },
+            onSaveAndContinue: { [weak self] in self?.saveBridgeURLAndContinue() },
+            onCancel: { [weak self] in self?.closePairingWindow() }
+        ))
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 540, height: 420),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Bridge Address"
+        window.level = .floating
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        pairingWindow = window
+        activateApp()
+    }
+
+    private func testBridgeURL() {
+        guard let state = bridgeURLSettingsState else { return }
+        let candidate = state.trimmedBridgeURL
+        state.validationState = .testing
+
+        Task { [weak self] in
+            do {
+                let normalizedURL = try await validateBridgeURL(candidate)
+                await MainActor.run {
+                    guard let self, self.bridgeURLSettingsState === state else { return }
+                    state.updateBridgeURL(normalizedURL)
+                    state.lastValidatedURL = normalizedURL
+                    state.validationState = .success("Connection succeeded. The bridge can reach itself at \(normalizedURL).")
+                }
+            } catch {
+                await MainActor.run {
+                    guard let self, self.bridgeURLSettingsState === state else { return }
+                    state.lastValidatedURL = nil
+                    state.validationState = .failure(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func saveBridgeURLAndContinue() {
+        guard let state = bridgeURLSettingsState, state.canSaveAndContinue else { return }
+
+        defaults.set(state.trimmedBridgeURL, forKey: bridgeURLDefaultsKey)
+
         guard let code = try? appState.bridgeDB.createPairingCode() else { return }
         showPairingWindow(code: code)
     }
@@ -381,12 +707,13 @@ final class StatusBarController: NSObject {
         state.code = code
         state.expiresAt = Date().addingTimeInterval(300)
 
-        if let bridgeURL = ProcessInfo.processInfo.environment["BRIDGE_URL"] {
+        if let bridgeURL = currentBridgeURL() {
             state.bridgeURL = bridgeURL
             state.qrPayload = "{\"host\":\"\(bridgeURL)\",\"code\":\"\(code)\"}"
         }
 
         self.pairingState = state
+        bridgeURLSettingsState = nil
 
         let hostingView = NSHostingView(rootView: PairingWindowView(
             state: state,
@@ -514,9 +841,22 @@ final class StatusBarController: NSObject {
     private func closePairingWindow() {
         expiryTimer?.invalidate()
         expiryTimer = nil
+        bridgeURLSettingsState = nil
         pairingState = nil
         pairingWindow?.close()
         pairingWindow = nil
+    }
+
+    private func currentBridgeURL() -> String? {
+        if let bridgeURL = ProcessInfo.processInfo.environment["BRIDGE_URL"], !bridgeURL.isEmpty {
+            return bridgeURL
+        }
+
+        guard let savedBridgeURL = defaults.string(forKey: bridgeURLDefaultsKey), !savedBridgeURL.isEmpty else {
+            return nil
+        }
+
+        return savedBridgeURL
     }
 
     /// Remove the status item from the menu bar. Called from SIGTERM handler
@@ -560,6 +900,7 @@ extension StatusBarController: NSWindowDelegate {
             approvalContinuation = nil
             expiryTimer?.invalidate()
             expiryTimer = nil
+            bridgeURLSettingsState = nil
             pairingState = nil
             pairingWindow = nil
         }

@@ -3,7 +3,7 @@ import Foundation
 
 enum AppIcon {
     static func applicationImage() -> NSImage? {
-        guard let url = iconURL() else {
+        guard let url = applicationIconURL() else {
             return nil
         }
 
@@ -11,7 +11,8 @@ enum AppIcon {
     }
 
     static func statusBarImage() -> NSImage? {
-        guard let image = applicationImage()?.copy() as? NSImage else {
+        guard let url = statusBarIconURL(),
+              let image = NSImage(contentsOf: url)?.copy() as? NSImage else {
             return nil
         }
 
@@ -19,14 +20,24 @@ enum AppIcon {
         return image
     }
 
-    private static func iconURL() -> URL? {
+    private static func applicationIconURL() -> URL? {
+        iconURL(named: "icon.svg", fallbacks: ["AppIcon.icns"])
+    }
+
+    private static func statusBarIconURL() -> URL? {
+        iconURL(named: "menu-bar-icon.svg", fallbacks: ["icon.svg", "AppIcon.icns"])
+    }
+
+    private static func iconURL(named preferredFileName: String, fallbacks: [String]) -> URL? {
+        let fileNames = [preferredFileName] + fallbacks
+
         if let mainResourceURL = Bundle.main.resourceURL,
-           let iconURL = bundledIconURL(in: mainResourceURL) {
+           let iconURL = bundledIconURL(in: mainResourceURL, fileNames: fileNames) {
             return iconURL
         }
 
         if let resourceBundleURL = BridgeAppConfiguration.resourceBundleURL,
-           let iconURL = bundledIconURL(in: resourceBundleURL) {
+           let iconURL = bundledIconURL(in: resourceBundleURL, fileNames: fileNames) {
             return iconURL
         }
 
@@ -34,15 +45,24 @@ enum AppIcon {
             return nil
         }
 
-        if let iconURL = repositoryIconURL(startingFrom: Bundle.main.executableURL?.deletingLastPathComponent()) {
-            return iconURL
+        let searchRoots = [
+            Bundle.main.executableURL?.deletingLastPathComponent(),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        ]
+
+        for root in searchRoots {
+            for fileName in fileNames {
+                if let iconURL = repositoryIconURL(startingFrom: root, fileName: fileName) {
+                    return iconURL
+                }
+            }
         }
 
-        return repositoryIconURL(startingFrom: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true))
+        return nil
     }
 
-    private static func bundledIconURL(in directory: URL) -> URL? {
-        for fileName in ["AppIcon.icns", "icon.svg"] {
+    private static func bundledIconURL(in directory: URL, fileNames: [String]) -> URL? {
+        for fileName in fileNames {
             let iconURL = directory.appendingPathComponent(fileName)
             if FileManager.default.fileExists(atPath: iconURL.path) {
                 return iconURL
@@ -52,7 +72,7 @@ enum AppIcon {
         return nil
     }
 
-    private static func repositoryIconURL(startingFrom directory: URL?) -> URL? {
+    private static func repositoryIconURL(startingFrom directory: URL?, fileName: String) -> URL? {
         guard let directory else {
             return nil
         }
@@ -60,10 +80,14 @@ enum AppIcon {
         var currentDirectory = directory.standardizedFileURL
         while true {
             let packageURL = currentDirectory.appendingPathComponent("Package.swift")
-            let iconURL = currentDirectory.appendingPathComponent("icon.svg")
-            if FileManager.default.fileExists(atPath: packageURL.path),
-               FileManager.default.fileExists(atPath: iconURL.path) {
-                return iconURL
+            let iconURLs = [
+                currentDirectory.appendingPathComponent(fileName),
+                currentDirectory.appendingPathComponent("assets", isDirectory: true).appendingPathComponent(fileName)
+            ]
+            if FileManager.default.fileExists(atPath: packageURL.path) {
+                for iconURL in iconURLs where FileManager.default.fileExists(atPath: iconURL.path) {
+                    return iconURL
+                }
             }
 
             let parentDirectory = currentDirectory.deletingLastPathComponent()
