@@ -1,17 +1,55 @@
 import AppKit
+import Carbon.HIToolbox.Events
+import Foundation
 import Vapor
 
 nonisolated(unsafe) var statusBarController: StatusBarController?
+nonisolated(unsafe) var appleEventHandler: AppleEventHandler?
+
+func terminateBridgeProcess() {
+    DispatchQueue.main.async {
+        if NSApp.modalWindow != nil {
+            NSApp.abortModal()
+        }
+        statusBarController?.removeStatusItem()
+        statusBarController = nil
+        exit(0)
+    }
+}
+
+final class AppleEventHandler: NSObject {
+    @objc func handleQuitAppleEvent(_: NSAppleEventDescriptor, withReplyEvent _: NSAppleEventDescriptor) {
+        terminateBridgeProcess()
+    }
+}
+
+let application = await MainActor.run { () -> NSApplication in
+    let application = NSApplication.shared
+    application.applicationIconImage = AppIcon.applicationImage()
+    application.finishLaunching()
+    return application
+}
+
+appleEventHandler = AppleEventHandler()
+NSAppleEventManager.shared().setEventHandler(
+    appleEventHandler!,
+    andSelector: #selector(AppleEventHandler.handleQuitAppleEvent(_:withReplyEvent:)),
+    forEventClass: AEEventClass(kCoreEventClass),
+    andEventID: AEEventID(kAEQuitApplication)
+)
 
 let preflightIssues = await MainActor.run {
     AppLaunchPreflight.run()
 }
 
-let shouldContinueLaunch = await MainActor.run {
+let preflightResult = await MainActor.run {
     AppLaunchPreflight.presentIfNeeded(preflightIssues)
 }
 
-guard shouldContinueLaunch else {
+switch preflightResult {
+case .continueLaunch:
+    break
+case .quit:
     exit(1)
 }
 
@@ -28,8 +66,7 @@ do {
 }
 
 // Set activation policy before creating UI elements
-NSApplication.shared.setActivationPolicy(.accessory)
-NSApplication.shared.applicationIconImage = AppIcon.applicationImage()
+application.setActivationPolicy(.accessory)
 
 let launchAtLoginManager = LaunchAtLoginManager()
 try? launchAtLoginManager.configureForCurrentLaunch()
@@ -41,21 +78,6 @@ statusBarController = StatusBarController(
     launchAtLoginManager: launchAtLoginManager,
     updater: updater
 )
-
-// Handle SIGTERM gracefully — remove the menu bar icon and exit.
-// NSApp.run() swallows SIGTERM by default, so we need our own handler.
-// Use a global queue since the main queue may not process GCD events
-// under NSApp.run(), then hop to the main run loop for UI cleanup.
-signal(SIGTERM, SIG_IGN)
-let termSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
-termSource.setEventHandler {
-    RunLoop.main.perform {
-        statusBarController?.removeStatusItem()
-        statusBarController = nil
-        exit(0)
-    }
-}
-termSource.resume()
 
 // Start Vapor in a detached task so it runs on the general executor,
 // not the main actor (which NSApp.run() will block)

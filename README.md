@@ -50,6 +50,7 @@ The bridge can be packaged as a background-only macOS app bundle that keeps the 
 ### Build a local app archive
 
 ```bash
+cp ./Scripts/package_app.local.env.example ./Scripts/package_app.local.env
 chmod +x ./Scripts/package_app.sh
 ./Scripts/package_app.sh
 ```
@@ -59,22 +60,34 @@ This creates:
 - `dist/Courier Bridge.app`
 - `dist/Courier-Bridge-<version>-<build>.zip`
 
+Required env var:
+
+- `COURIER_BRIDGE_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"`
+
+For local development, `Scripts/package_app.sh` automatically loads `Scripts/package_app.local.env` if it exists.
+Start by copying `Scripts/package_app.local.env.example` and putting your local signing identity there.
+
 Optional env vars:
 
 - `COURIER_BRIDGE_VERSION_NAME=0.1.0`
 - `COURIER_BRIDGE_BUILD_NUMBER=1001`
 - `COURIER_BRIDGE_BUNDLE_ID=rip.build.courier.bridge`
-- `COURIER_BRIDGE_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"`
 
 ### GitHub Actions prereleases
 
 The bridge repo publishes prerelease app archives from `.github/workflows/publish-prerelease.yml`.
 
-If you want the published build to be signed and notarized, add these repository secrets:
+Published builds require these Developer ID signing secrets:
 
 - `MACOS_DEVELOPER_ID_P12_B64`
 - `MACOS_DEVELOPER_ID_P12_PASSWORD`
 - `MACOS_DEVELOPER_ID_IDENTITY`
+
+Notarization is still optional and uses these additional repository secrets:
+
+- `APPLE_NOTARY_API_KEY_B64`
+- `APPLE_NOTARY_KEY_ID`
+- `APPLE_NOTARY_ISSUER_ID`
 - `APPLE_NOTARY_API_KEY_B64`
 - `APPLE_NOTARY_KEY_ID`
 - `APPLE_NOTARY_ISSUER_ID`

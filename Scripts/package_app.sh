@@ -2,6 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
+LOCAL_ENV_FILE="$ROOT_DIR/Scripts/package_app.local.env"
+
+if [[ -f "$LOCAL_ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$LOCAL_ENV_FILE"
+  set +a
+fi
+
 OUTPUT_DIR=${COURIER_BRIDGE_OUTPUT_DIR:-"$ROOT_DIR/dist"}
 BUILD_CONFIGURATION=${COURIER_BRIDGE_BUILD_CONFIGURATION:-release}
 APP_NAME=${COURIER_BRIDGE_APP_NAME:-"Courier Bridge"}
@@ -12,7 +21,7 @@ BUILD_NUMBER=${COURIER_BRIDGE_BUILD_NUMBER:-1}
 GITHUB_REPOSITORY=${COURIER_BRIDGE_GITHUB_REPOSITORY:-build-rip/courier-bridge}
 ASSET_PREFIX=${COURIER_BRIDGE_RELEASE_ASSET_PREFIX:-Courier-Bridge-}
 ASSET_SUFFIX=${COURIER_BRIDGE_RELEASE_ASSET_SUFFIX:-.zip}
-ENABLE_CODESIGN=${COURIER_BRIDGE_CODESIGN_IDENTITY:-}
+CODESIGN_IDENTITY=${COURIER_BRIDGE_CODESIGN_IDENTITY:-}
 
 BUILD_DIR="$ROOT_DIR/.build/$BUILD_CONFIGURATION"
 EXECUTABLE_PATH="$BUILD_DIR/$PRODUCT_NAME"
@@ -27,6 +36,11 @@ ICON_ICNS_PATH="$OUTPUT_DIR/AppIcon.icns"
 ZIP_PATH="$OUTPUT_DIR/${ASSET_PREFIX}${VERSION_NAME}-${BUILD_NUMBER}${ASSET_SUFFIX}"
 
 mkdir -p "$OUTPUT_DIR"
+
+if [[ -z "$CODESIGN_IDENTITY" ]]; then
+  echo "COURIER_BRIDGE_CODESIGN_IDENTITY is required to package Courier Bridge." >&2
+  exit 1
+fi
 
 swift build -c "$BUILD_CONFIGURATION" --product "$PRODUCT_NAME"
 
@@ -110,9 +124,7 @@ cat > "$CONTENTS_PATH/Info.plist" <<EOF
 </plist>
 EOF
 
-if [[ -n "$ENABLE_CODESIGN" ]]; then
-  codesign --force --deep --options runtime --sign "$ENABLE_CODESIGN" "$APP_BUNDLE_PATH"
-fi
+codesign --force --deep --options runtime --sign "$CODESIGN_IDENTITY" "$APP_BUNDLE_PATH"
 
 ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE_PATH" "$ZIP_PATH"
 

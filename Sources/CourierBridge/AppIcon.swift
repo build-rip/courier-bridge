@@ -20,16 +20,36 @@ enum AppIcon {
     }
 
     private static func iconURL() -> URL? {
-        let candidateURLs = [
-            Bundle.main.resourceURL?.appendingPathComponent("icon.svg"),
-            Bundle.main.resourceURL?.appendingPathComponent("AppIcon.icns"),
-            BridgeAppConfiguration.resourceBundleURL?.appendingPathComponent("icon.svg"),
-            BridgeAppConfiguration.resourceBundleURL?.appendingPathComponent("AppIcon.icns"),
-            repositoryIconURL(startingFrom: Bundle.main.executableURL?.deletingLastPathComponent()),
-            repositoryIconURL(startingFrom: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)),
-        ]
+        if let mainResourceURL = Bundle.main.resourceURL,
+           let iconURL = bundledIconURL(in: mainResourceURL) {
+            return iconURL
+        }
 
-        return candidateURLs.compactMap { $0 }.first(where: { FileManager.default.fileExists(atPath: $0.path) })
+        if let resourceBundleURL = BridgeAppConfiguration.resourceBundleURL,
+           let iconURL = bundledIconURL(in: resourceBundleURL) {
+            return iconURL
+        }
+
+        guard !BridgeAppConfiguration.isBundledApp else {
+            return nil
+        }
+
+        if let iconURL = repositoryIconURL(startingFrom: Bundle.main.executableURL?.deletingLastPathComponent()) {
+            return iconURL
+        }
+
+        return repositoryIconURL(startingFrom: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true))
+    }
+
+    private static func bundledIconURL(in directory: URL) -> URL? {
+        for fileName in ["AppIcon.icns", "icon.svg"] {
+            let iconURL = directory.appendingPathComponent(fileName)
+            if FileManager.default.fileExists(atPath: iconURL.path) {
+                return iconURL
+            }
+        }
+
+        return nil
     }
 
     private static func repositoryIconURL(startingFrom directory: URL?) -> URL? {
