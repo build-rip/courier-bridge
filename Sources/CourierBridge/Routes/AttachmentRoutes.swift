@@ -4,11 +4,11 @@ import CourierCore
 func attachmentRoutes(_ app: RoutesBuilder) {
     // GET /api/attachments/:id - serve an attachment file
     app.get("attachments", ":id") { req -> Response in
-        guard let attachmentRowID = req.parameters.get("id", as: Int64.self) else {
+        guard let attachmentID = req.parameters.get("id"), !attachmentID.isEmpty else {
             throw Abort(.badRequest, reason: "Invalid attachment ID")
         }
 
-        guard let attachment = try req.appState.queries.attachment(rowID: attachmentRowID) else {
+        guard let attachment = try req.appState.queries.attachment(identifier: attachmentID) else {
             throw Abort(.notFound, reason: "Attachment not found")
         }
 

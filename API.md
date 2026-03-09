@@ -299,7 +299,9 @@ Revokes a paired device.
 
 ### `GET /api/attachments/:id`
 
-Streams the attachment file by attachment row ID.
+Streams the attachment file by attachment ID. Clients should prefer the normalized
+attachment GUID from conversation events; numeric attachment row IDs are still
+accepted for compatibility.
 
 ### `GET /api/messages/:id/attachments`
 

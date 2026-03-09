@@ -303,6 +303,33 @@ public struct ChatQueries: Sendable {
         }
     }
 
+    /// Fetch a single attachment by stable identifier.
+    ///
+    /// The normalized conversation event log exposes attachment GUIDs, while older
+    /// clients may still reference attachment ROWIDs directly. This lookup accepts
+    /// either form and prefers an exact GUID match when available.
+    public func attachment(identifier: String) throws -> Attachment? {
+        try db.read { db in
+            if let attachment = try Attachment.fetchOne(
+                db,
+                sql: "SELECT ROWID, * FROM attachment WHERE guid = ?",
+                arguments: [identifier]
+            ) {
+                return attachment
+            }
+
+            guard let rowID = Int64(identifier) else {
+                return nil
+            }
+
+            return try Attachment.fetchOne(
+                db,
+                sql: "SELECT ROWID, * FROM attachment WHERE ROWID = ?",
+                arguments: [rowID]
+            )
+        }
+    }
+
     // MARK: - Cursors
 
     /// Get the maximum message ROWID (used for change detection cursor).
