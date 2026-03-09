@@ -1,0 +1,24 @@
+{
+  "configurations": [
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:courier-bridge}",
+      "name": "Debug courier-bridge",
+      "target": "courier-bridge",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug courier-bridge"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:courier-bridge}",
+      "name": "Release courier-bridge",
+      "target": "courier-bridge",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release courier-bridge"
+    }
+  ]
+}
