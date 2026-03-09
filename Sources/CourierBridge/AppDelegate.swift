@@ -45,6 +45,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Called when the user opens the app while it's already running
+        // (e.g. double-click in Finder, Spotlight, Dock click). Pop open
+        // the status bar menu so they get feedback.
+        statusBarController?.openMenu()
+        return false
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if NSApp.modalWindow != nil {
             NSApp.abortModal()
