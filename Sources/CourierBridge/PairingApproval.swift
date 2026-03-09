@@ -1,9 +1,8 @@
 import AppKit
 
-@MainActor
 func requestPairingApproval(deviceName: String?, ipAddress: String?, country: String?) async -> Bool {
     await withCheckedContinuation { continuation in
-        RunLoop.main.perform { [continuation] in
+        Task { @MainActor in
             guard let controller = (NSApp.delegate as? AppDelegate)?.statusBarController else {
                 continuation.resume(returning: false)
                 return
