@@ -60,6 +60,11 @@ final class LaunchAtLoginManager {
             <array>
                 <string>Aqua</string>
             </array>
+            <key>EnvironmentVariables</key>
+            <dict>
+                <key>COURIER_LAUNCHED_AT_LOGIN</key>
+                <string>1</string>
+            </dict>
             <key>ProgramArguments</key>
             <array>
                 <string>\(executablePath.xmlEscaped)</string>

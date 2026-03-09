@@ -490,6 +490,11 @@ final class StatusBarController: NSObject {
         startStatusUpdates()
     }
 
+    /// Programmatically open the status item's dropdown menu.
+    func openMenu() {
+        statusItem.button?.performClick(nil)
+    }
+
     // MARK: - Menu Setup
 
     private func setupMenuBarIcon() {

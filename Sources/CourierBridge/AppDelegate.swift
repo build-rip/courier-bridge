@@ -11,6 +11,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var statusBarController: StatusBarController?
     private var vaporApp: Application?
 
+    /// True when the app was launched by the user (Spotlight, Finder, etc.)
+    /// rather than automatically by the LaunchAgent at login.
+    private var isManualLaunch: Bool {
+        ProcessInfo.processInfo.environment["COURIER_LAUNCHED_AT_LOGIN"] == nil
+    }
+
     // MARK: - NSApplicationDelegate
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -97,6 +103,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await MainActor.run {
                     NSApp.terminate(nil)
                 }
+            }
+
+            // If the user launched the app manually (not at login), pop open
+            // the menu so they get immediate feedback that the bridge is running.
+            // Short delay lets the status item fully settle into the menu bar.
+            if isManualLaunch {
+                try? await Task.sleep(for: .milliseconds(200))
+                statusBarController?.openMenu()
             }
 
             await updater.performBackgroundCheckIfNeeded()
