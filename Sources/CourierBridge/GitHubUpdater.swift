@@ -175,9 +175,10 @@ final class GitHubUpdater {
         alert.addButton(withTitle: "Install")
         alert.addButton(withTitle: "Later")
         alert.addButton(withTitle: "Open Release Page")
-        NSApp.activate(ignoringOtherApps: true)
+        AppDelegate.shared.activateForUserInteraction()
 
         let response = alert.runModal()
+        AppDelegate.shared.returnToAccessoryModeIfAppropriate()
         if response == .alertFirstButtonReturn {
             do {
                 try await downloadAndInstall(release: release)
@@ -281,8 +282,9 @@ final class GitHubUpdater {
         alert.messageText = title
         alert.informativeText = message
         alert.alertStyle = style
-        NSApp.activate(ignoringOtherApps: true)
+        AppDelegate.shared.activateForUserInteraction()
         alert.runModal()
+        AppDelegate.shared.returnToAccessoryModeIfAppropriate()
     }
 
     private func shellQuoted(_ value: String) -> String {

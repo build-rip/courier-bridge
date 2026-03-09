@@ -573,8 +573,9 @@ final class StatusBarController: NSObject {
         pairingWindow?.close()
     }
 
-    private func activateApp() {
-        NSApp.activate(ignoringOtherApps: true)
+    /// Whether any window managed by this controller is currently visible.
+    var hasVisibleWindow: Bool {
+        pairingWindow?.isVisible == true
     }
 
     private func configureUpdater() {
@@ -664,7 +665,7 @@ final class StatusBarController: NSObject {
         window.contentView = hostingView
         window.makeKeyAndOrderFront(nil)
         pairingWindow = window
-        activateApp()
+        AppDelegate.shared.activateForUserInteraction()
     }
 
     private func testBridgeURL() {
@@ -735,7 +736,7 @@ final class StatusBarController: NSObject {
         window.contentView = hostingView
         window.makeKeyAndOrderFront(nil)
         pairingWindow = window
-        activateApp()
+        AppDelegate.shared.activateForUserInteraction()
 
         startExpiryTimer()
     }
@@ -801,19 +802,21 @@ final class StatusBarController: NSObject {
             startExpiryTimer()
         }
 
-        activateApp()
+        AppDelegate.shared.activateForUserInteraction()
     }
 
     private func allowPairing() {
         approvalContinuation?.resume(returning: true)
         approvalContinuation = nil
         closePairingWindow()
+        AppDelegate.shared.returnToAccessoryModeIfAppropriate()
     }
 
     private func denyPairing() {
         approvalContinuation?.resume(returning: false)
         approvalContinuation = nil
         closePairingWindow()
+        AppDelegate.shared.returnToAccessoryModeIfAppropriate()
     }
 
     // MARK: - Expiry
@@ -835,6 +838,7 @@ final class StatusBarController: NSObject {
             approvalContinuation?.resume(returning: false)
             approvalContinuation = nil
             closePairingWindow()
+            AppDelegate.shared.returnToAccessoryModeIfAppropriate()
         }
     }
 
@@ -859,12 +863,9 @@ final class StatusBarController: NSObject {
         return savedBridgeURL
     }
 
-    /// Remove the status item from the menu bar. Called from SIGTERM handler
-    /// on DispatchQueue.main (which is the main thread, same as MainActor).
-    nonisolated func removeStatusItem() {
-        MainActor.assumeIsolated {
-            NSStatusBar.system.removeStatusItem(statusItem)
-        }
+    /// Remove the status item from the menu bar.
+    func removeStatusItem() {
+        NSStatusBar.system.removeStatusItem(statusItem)
     }
 
     @objc private func toggleLaunchAtLogin() {
@@ -877,8 +878,9 @@ final class StatusBarController: NSObject {
             alert.messageText = "Unable to Change Launch Setting"
             alert.informativeText = error.localizedDescription
             alert.alertStyle = .warning
-            NSApp.activate(ignoringOtherApps: true)
+            AppDelegate.shared.activateForUserInteraction()
             alert.runModal()
+            AppDelegate.shared.returnToAccessoryModeIfAppropriate()
         }
     }
 
@@ -895,7 +897,7 @@ final class StatusBarController: NSObject {
 
 extension StatusBarController: NSWindowDelegate {
     nonisolated func windowWillClose(_ notification: Notification) {
-        Task { @MainActor in
+        MainActor.assumeIsolated {
             approvalContinuation?.resume(returning: false)
             approvalContinuation = nil
             expiryTimer?.invalidate()
@@ -903,6 +905,7 @@ extension StatusBarController: NSWindowDelegate {
             bridgeURLSettingsState = nil
             pairingState = nil
             pairingWindow = nil
+            AppDelegate.shared.returnToAccessoryModeIfAppropriate()
         }
     }
 }
