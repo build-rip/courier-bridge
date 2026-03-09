@@ -1,6 +1,8 @@
 # Courier Bridge
 
-A macOS bridge server that exposes Messages functionality via a REST API and WebSocket events, designed to be consumed by an Android companion app.
+A macOS bridge server that exposes Messages functionality via a REST API and websocket cursor updates, designed to be consumed by an Android companion app.
+
+The current API contract is documented in `API.md`.
 
 ## Requirements
 

@@ -4,10 +4,10 @@ import GRDB
 public final class ChatDatabase: Sendable {
     private let dbQueue: DatabaseQueue
 
-    public init(path: String? = nil) throws {
+    public init(path: String? = nil, readonly: Bool = true) throws {
         let dbPath = path ?? Self.defaultPath
         var config = Configuration()
-        config.readonly = true
+        config.readonly = readonly
         dbQueue = try DatabaseQueue(path: dbPath, configuration: config)
     }
 

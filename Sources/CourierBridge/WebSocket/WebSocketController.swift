@@ -44,8 +44,8 @@ actor WebSocketController {
         print("[WS] Client disconnected: \(id) (total: \(clients.count))")
     }
 
-    func broadcast(event: MessageEvent) {
-        let envelope = MessageEventEnvelope(event: event)
+    func broadcast(cursorUpdate: ConversationCursorUpdate) {
+        let envelope = ConversationCursorUpdateEnvelope(payload: cursorUpdate)
         guard let data = try? encoder.encode(envelope) else { return }
         guard let json = String(data: data, encoding: .utf8) else { return }
 

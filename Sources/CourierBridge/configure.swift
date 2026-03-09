@@ -12,6 +12,8 @@ struct AppState: Sendable {
     let uiAutomation: UIAutomation
     let bridgeDB: BridgeDatabase
     let wsController: WebSocketController
+    let syncService: ConversationSyncService
+    let mutationExecutor: MutationSerialExecutor
 }
 
 /// Storage key for AppState.
@@ -44,8 +46,18 @@ func configure(_ app: Application) async throws {
     // Initialize bridge database (for auth/pairing)
     let bridgeDB = try BridgeDatabase()
 
+    // Initialize WebSocket controller and sync services
+    let wsController = WebSocketController()
+    let syncService = ConversationSyncService(
+        queries: queries,
+        bridgeDB: bridgeDB,
+        wsController: wsController,
+        conversationVersion: BridgeSyncContract.currentConversationVersion
+    )
+    let mutationExecutor = MutationSerialExecutor()
+
     // Initialize message poller and file watcher
-    let poller = try MessagePoller(queries: queries)
+    let poller = MessagePoller()
     let fileWatcher = try FileWatcher(dbPath: chatDB.path) {
         Task { await poller.onChange() }
     }
@@ -53,9 +65,6 @@ func configure(_ app: Application) async throws {
     // Initialize sender
     let sender = AppleScriptSender()
     let uiAutomation = UIAutomation()
-
-    // Initialize WebSocket controller
-    let wsController = WebSocketController()
 
     let state = AppState(
         chatDB: chatDB,
@@ -65,7 +74,9 @@ func configure(_ app: Application) async throws {
         sender: sender,
         uiAutomation: uiAutomation,
         bridgeDB: bridgeDB,
-        wsController: wsController
+        wsController: wsController,
+        syncService: syncService,
+        mutationExecutor: mutationExecutor
     )
     app.appState = state
 
@@ -81,15 +92,17 @@ func configure(_ app: Application) async throws {
     // Register routes
     try registerRoutes(app)
 
+    try await syncService.start()
+
     // Start file watcher and event streaming
     fileWatcher.start()
     await poller.start()
 
-    // Start broadcasting events to WebSocket clients
+    // Start reindexing on source changes and broadcasting cursor updates
     let eventStream = await poller.eventStream()
     Task {
-        for await event in eventStream {
-            await wsController.broadcast(event: event)
+        for await _ in eventStream {
+            await syncService.processSourceChanges()
         }
     }
 

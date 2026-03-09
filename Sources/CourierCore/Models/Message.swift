@@ -15,6 +15,14 @@ public struct Message: Sendable, Codable, FetchableRecord {
     public let service: String?
     public let associatedMessageGUID: String?
     public let associatedMessageType: Int64
+    public let associatedMessageEmoji: String?
+    public let replyToGUID: String?
+    public let partCount: Int64
+    public let dateEdited: Int64
+    public let dateRetracted: Int64
+    public let dateRecovered: Int64
+    public let messageActionType: Int64
+    public let itemType: Int64
     public let groupTitle: String?
     public let isAudioMessage: Bool
     public let cacheHasAttachments: Bool
@@ -36,6 +44,14 @@ public struct Message: Sendable, Codable, FetchableRecord {
         case service
         case associatedMessageGUID = "associated_message_guid"
         case associatedMessageType = "associated_message_type"
+        case associatedMessageEmoji = "associated_message_emoji"
+        case replyToGUID = "reply_to_guid"
+        case partCount = "part_count"
+        case dateEdited = "date_edited"
+        case dateRetracted = "date_retracted"
+        case dateRecovered = "date_recovered"
+        case messageActionType = "message_action_type"
+        case itemType = "item_type"
         case groupTitle = "group_title"
         case isAudioMessage = "is_audio_message"
         case cacheHasAttachments = "cache_has_attachments"
@@ -90,9 +106,41 @@ public struct Message: Sendable, Codable, FetchableRecord {
         dateDelivered == 0 ? nil : AppleDate.toDate(dateDelivered)
     }
 
+    public var dateEditedAsDate: Date? {
+        dateEdited == 0 ? nil : AppleDate.toDate(dateEdited)
+    }
+
+    public var dateRetractedAsDate: Date? {
+        dateRetracted == 0 ? nil : AppleDate.toDate(dateRetracted)
+    }
+
+    public var dateRecoveredAsDate: Date? {
+        dateRecovered == 0 ? nil : AppleDate.toDate(dateRecovered)
+    }
+
+    public var isEdited: Bool {
+        dateEdited != 0
+    }
+
+    public var isRetracted: Bool {
+        dateRetracted != 0
+    }
+
+    public var isRecovered: Bool {
+        dateRecovered != 0
+    }
+
+    public var isCurrentlyRetracted: Bool {
+        isRetracted && !isRecovered
+    }
+
     /// Whether this message is a reaction/tapback rather than a regular message.
     public var isReaction: Bool {
         associatedMessageType >= 2000 && associatedMessageType < 4000
+    }
+
+    public var isRegularMessage: Bool {
+        associatedMessageType == 0
     }
 
     /// The tapback type if this is a reaction.

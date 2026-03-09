@@ -38,6 +38,16 @@ let package = Package(
             name: "CourierCoreTests",
             dependencies: [
                 "CourierCore",
+                .product(name: "GRDB", package: "GRDB.swift"),
+                .product(name: "Testing", package: "swift-testing"),
+            ]
+        ),
+        .testTarget(
+            name: "CourierBridgeTests",
+            dependencies: [
+                "CourierBridge",
+                "CourierCore",
+                .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "Testing", package: "swift-testing"),
             ]
         ),

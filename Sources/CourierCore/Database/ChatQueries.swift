@@ -10,6 +10,137 @@ public struct ChatQueries: Sendable {
 
     // MARK: - Chats
 
+    /// Fetch all chats in ascending ROWID order.
+    public func chats() throws -> [Chat] {
+        try db.read { db in
+            try Chat.fetchAll(db, sql: "SELECT ROWID, * FROM chat ORDER BY ROWID ASC")
+        }
+    }
+
+    public func chat(guid: String) throws -> Chat? {
+        try db.read { db in
+            try Chat.fetchOne(db, sql: "SELECT ROWID, * FROM chat WHERE guid = ? LIMIT 1", arguments: [guid])
+        }
+    }
+
+    /// Build a full source snapshot for a conversation.
+    public func conversationSnapshot(forChatRowID chatRowID: Int64) throws -> ConversationSourceSnapshot? {
+        try db.read { db in
+            guard let chat = try Chat.fetchOne(
+                db,
+                sql: "SELECT ROWID, * FROM chat WHERE ROWID = ? LIMIT 1",
+                arguments: [chatRowID]
+            ) else {
+                return nil
+            }
+
+            let participantHandles = try Handle.fetchAll(
+                db,
+                sql: """
+                    SELECT h.ROWID AS ROWID, h.*
+                    FROM handle h
+                    JOIN chat_handle_join chj ON chj.handle_id = h.ROWID
+                    WHERE chj.chat_id = ?
+                    ORDER BY h.id ASC
+                    """,
+                arguments: [chatRowID]
+            )
+
+            let senderHandles = try Handle.fetchAll(
+                db,
+                sql: """
+                    SELECT DISTINCT h.ROWID AS ROWID, h.*
+                    FROM handle h
+                    WHERE h.ROWID IN (
+                        SELECT DISTINCT m.handle_id
+                        FROM message m
+                        JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+                        WHERE cmj.chat_id = ?
+                          AND m.handle_id > 0
+                    )
+                    ORDER BY h.id ASC
+                    """,
+                arguments: [chatRowID]
+            )
+
+            let participants = participantHandles
+                .map {
+                    ConversationParticipant(
+                        handleID: $0.rowID,
+                        identifier: $0.id,
+                        service: $0.service,
+                        country: $0.country
+                    )
+                }
+                .sorted { $0.identifier < $1.identifier }
+
+            let handleByID = Dictionary(uniqueKeysWithValues: senderHandles.map { ($0.rowID, $0.id) })
+
+            let rawMessages = try Message.fetchAll(
+                db,
+                sql: """
+                    SELECT m.ROWID AS ROWID, m.*
+                    FROM message m
+                    JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+                    WHERE cmj.chat_id = ?
+                    ORDER BY m.date ASC, m.ROWID ASC
+                    """,
+                arguments: [chatRowID]
+            )
+
+            let attachmentRows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT a.ROWID AS ROWID, a.*, maj.message_id
+                    FROM attachment a
+                    JOIN message_attachment_join maj ON maj.attachment_id = a.ROWID
+                    JOIN chat_message_join cmj ON cmj.message_id = maj.message_id
+                    WHERE cmj.chat_id = ?
+                    ORDER BY maj.message_id ASC, a.ROWID ASC
+                    """,
+                arguments: [chatRowID]
+            )
+
+            var attachmentsByMessageID: [Int64: [Attachment]] = [:]
+            for row in attachmentRows {
+                let messageID: Int64 = row["message_id"]
+                let attachment = try Attachment(row: row)
+                attachmentsByMessageID[messageID, default: []].append(attachment)
+            }
+
+            let conversation = ConversationDescriptor(
+                rowID: chat.rowID,
+                conversationID: chat.guid,
+                chatGUID: chat.guid,
+                chatIdentifier: chat.chatIdentifier,
+                displayName: chat.displayName,
+                serviceName: chat.serviceName,
+                groupID: chat.groupID
+            )
+
+            let messages = rawMessages.map { message in
+                ConversationSourceMessage(
+                    message: message,
+                    senderID: message.isFromMe ? nil : handleByID[message.handleID],
+                    attachments: attachmentsByMessageID[message.rowID] ?? []
+                )
+            }
+
+            return ConversationSourceSnapshot(
+                conversation: conversation,
+                participants: participants,
+                messages: messages
+            )
+        }
+    }
+
+    /// Build full source snapshots for all conversations.
+    public func allConversationSnapshots() throws -> [ConversationSourceSnapshot] {
+        try chats().compactMap { chat in
+            try conversationSnapshot(forChatRowID: chat.rowID)
+        }
+    }
+
     /// Fetch recent chats ordered by most recent message, with per-chat max rowIDs for sync.
     public func recentChats(limit: Int = 50) throws -> [ChatWithLastMessage] {
         try db.read { db in
@@ -61,76 +192,6 @@ public struct ChatQueries: Sendable {
         }
     }
 
-    /// Fetch messages and reactions for a specific chat, for per-chat sync.
-    /// Messages with ROWID > msgAfter and reactions with ROWID > rxnAfter, both sorted ASC.
-    public func syncChat(
-        chatRowID: Int64,
-        msgAfter: Int64,
-        rxnAfter: Int64,
-        readAfter: Int64,
-        deliveryAfter: Int64,
-        limit: Int
-    ) throws -> (messages: [Message], reactions: [Message], readReceipts: [Message], deliveryReceipts: [Message]) {
-        try db.read { db in
-            let msgSQL = """
-                SELECT m.*
-                FROM message m
-                JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
-                WHERE cmj.chat_id = ?
-                  AND m.ROWID > ?
-                  AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000)
-                ORDER BY m.ROWID ASC
-                LIMIT ?
-                """
-            let messages = try Message.fetchAll(db, sql: msgSQL, arguments: [chatRowID, msgAfter, limit])
-
-            let rxnSQL = """
-                SELECT m.*
-                FROM message m
-                JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
-                WHERE cmj.chat_id = ?
-                  AND m.ROWID > ?
-                  AND m.associated_message_type >= 2000
-                ORDER BY m.ROWID ASC
-                LIMIT ?
-                """
-            let reactions = try Message.fetchAll(db, sql: rxnSQL, arguments: [chatRowID, rxnAfter, limit])
-
-            let readSQL = """
-                SELECT m.*
-                FROM message m
-                JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
-                WHERE cmj.chat_id = ?
-                  AND m.date_read > ?
-                  AND m.is_from_me = 1
-                  AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000)
-                ORDER BY m.date_read ASC
-                LIMIT ?
-                """
-            let readReceipts = try Message.fetchAll(db, sql: readSQL, arguments: [chatRowID, readAfter, limit])
-
-            let deliverySQL = """
-                SELECT m.*
-                FROM message m
-                JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
-                WHERE cmj.chat_id = ?
-                  AND m.date_delivered > ?
-                  AND m.is_from_me = 1
-                  AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000)
-                ORDER BY m.date_delivered ASC
-                LIMIT ?
-                """
-            let deliveryReceipts = try Message.fetchAll(db, sql: deliverySQL, arguments: [chatRowID, deliveryAfter, limit])
-
-            return (
-                messages: messages,
-                reactions: reactions,
-                readReceipts: readReceipts,
-                deliveryReceipts: deliveryReceipts
-            )
-        }
-    }
-
     // MARK: - Messages
 
     /// Fetch messages for a chat, optionally after a given ROWID, newest first.
@@ -142,7 +203,7 @@ public struct ChatQueries: Sendable {
     ) throws -> [Message] {
         try db.read { db in
             var sql = """
-                SELECT m.*
+                SELECT m.ROWID AS ROWID, m.*
                 FROM message m
                 JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
                 WHERE cmj.chat_id = ?
@@ -170,7 +231,7 @@ public struct ChatQueries: Sendable {
     ) throws -> [Message] {
         try db.read { db in
             var sql = """
-                SELECT m.*
+                SELECT m.ROWID AS ROWID, m.*
                 FROM message m
                 JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
                 WHERE cmj.chat_id = ?
@@ -190,71 +251,13 @@ public struct ChatQueries: Sendable {
         }
     }
 
-    /// Fetch new messages across all chats after a given ROWID.
-    public func newMessages(afterRowID: Int64, limit: Int = 100) throws -> [Message] {
-        try db.read { db in
-            let sql = """
-                SELECT m.*
-                FROM message m
-                WHERE m.ROWID > ?
-                ORDER BY m.ROWID ASC
-                LIMIT ?
-                """
-            return try Message.fetchAll(db, sql: sql, arguments: [afterRowID, limit])
-        }
-    }
-
-    /// Fetch new messages across all chats after a given ROWID, with chat IDs.
-    /// Excludes reactions. Used for post-reconnect sync.
-    public func newMessagesWithChatIDs(afterRowID: Int64, limit: Int = 500) throws -> [(message: Message, chatRowID: Int64)] {
-        try db.read { db in
-            let sql = """
-                SELECT m.*, cmj.chat_id
-                FROM message m
-                JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
-                WHERE m.ROWID > ?
-                  AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000)
-                ORDER BY m.ROWID ASC
-                LIMIT ?
-                """
-            let rows = try Row.fetchAll(db, sql: sql, arguments: [afterRowID, limit])
-            return try rows.map { row in
-                let message = try Message(row: row)
-                let chatRowID: Int64 = row["chat_id"]
-                return (message: message, chatRowID: chatRowID)
-            }
-        }
-    }
-
-    /// Fetch new reactions across all chats after a given ROWID, with chat IDs.
-    /// Used for post-reconnect sync.
-    public func newReactionsWithChatIDs(afterRowID: Int64, limit: Int = 500) throws -> [(message: Message, chatRowID: Int64)] {
-        try db.read { db in
-            let sql = """
-                SELECT m.*, cmj.chat_id
-                FROM message m
-                JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
-                WHERE m.ROWID > ?
-                  AND m.associated_message_type >= 2000
-                ORDER BY m.ROWID ASC
-                LIMIT ?
-                """
-            let rows = try Row.fetchAll(db, sql: sql, arguments: [afterRowID, limit])
-            return try rows.map { row in
-                let message = try Message(row: row)
-                let chatRowID: Int64 = row["chat_id"]
-                return (message: message, chatRowID: chatRowID)
-            }
-        }
-    }
-
     // MARK: - Handles / Participants
 
     /// Fetch handles (participants) for a chat.
     public func handles(forChatRowID chatRowID: Int64) throws -> [Handle] {
         try db.read { db in
             let sql = """
-                SELECT h.*
+                SELECT h.ROWID AS ROWID, h.*
                 FROM handle h
                 JOIN chat_handle_join chj ON chj.handle_id = h.ROWID
                 WHERE chj.chat_id = ?
@@ -266,7 +269,7 @@ public struct ChatQueries: Sendable {
     /// Look up a handle by its ROWID to resolve handleID → phone/email.
     public func handle(rowID: Int64) throws -> Handle? {
         try db.read { db in
-            try Handle.fetchOne(db, sql: "SELECT * FROM handle WHERE ROWID = ?", arguments: [rowID])
+            try Handle.fetchOne(db, sql: "SELECT ROWID, * FROM handle WHERE ROWID = ?", arguments: [rowID])
         }
     }
 
@@ -284,7 +287,7 @@ public struct ChatQueries: Sendable {
     public func attachments(forMessageRowID messageRowID: Int64) throws -> [Attachment] {
         try db.read { db in
             let sql = """
-                SELECT a.*
+                SELECT a.ROWID AS ROWID, a.*
                 FROM attachment a
                 JOIN message_attachment_join maj ON maj.attachment_id = a.ROWID
                 WHERE maj.message_id = ?
@@ -296,7 +299,7 @@ public struct ChatQueries: Sendable {
     /// Fetch a single attachment by ROWID.
     public func attachment(rowID: Int64) throws -> Attachment? {
         try db.read { db in
-            try Attachment.fetchOne(db, sql: "SELECT * FROM attachment WHERE ROWID = ?", arguments: [rowID])
+            try Attachment.fetchOne(db, sql: "SELECT ROWID, * FROM attachment WHERE ROWID = ?", arguments: [rowID])
         }
     }
 
@@ -320,7 +323,7 @@ public struct ChatQueries: Sendable {
     public func messageInChat(guid: String, chatRowID: Int64) throws -> Message? {
         try db.read { db in
             let sql = """
-                SELECT m.*
+                SELECT m.ROWID AS ROWID, m.*
                 FROM message m
                 JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
                 WHERE cmj.chat_id = ?
@@ -349,7 +352,7 @@ public struct ChatQueries: Sendable {
 
         let reactions: [Message] = try db.read { db in
             let sql = """
-                SELECT m.*
+                SELECT m.ROWID AS ROWID, m.*
                 FROM message m
                 JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
                 WHERE cmj.chat_id = ?
@@ -385,7 +388,7 @@ public struct ChatQueries: Sendable {
         }
     }
 
-    // MARK: - Read/Delivery Cursors
+    // MARK: - Source Cursors
 
     /// Get the maximum date_read timestamp across all messages.
     public func maxDateRead() throws -> Int64 {
@@ -401,49 +404,63 @@ public struct ChatQueries: Sendable {
         }
     }
 
-    /// Fetch messages whose date_read changed after the given timestamp, with chat IDs.
-    /// Excludes reactions. Used for detecting read receipt changes.
-    public func messagesWithReadChanges(afterTimestamp: Int64) throws -> [(message: Message, chatRowID: Int64)] {
+    public func maxDateEdited() throws -> Int64 {
         try db.read { db in
-            let sql = """
-                SELECT m.*, cmj.chat_id
-                FROM message m
-                JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
-                WHERE m.date_read > ?
-                  AND m.is_from_me = 1
-                  AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000)
-                ORDER BY m.date_read ASC
-                """
-            let rows = try Row.fetchAll(db, sql: sql, arguments: [afterTimestamp])
-            return try rows.map { row in
-                let message = try Message(row: row)
-                let chatRowID: Int64 = row["chat_id"]
-                return (message: message, chatRowID: chatRowID)
-            }
+            try Int64.fetchOne(db, sql: "SELECT MAX(date_edited) FROM message") ?? 0
         }
     }
 
-    /// Fetch outgoing messages whose date_delivered changed after the given timestamp, with chat IDs.
-    /// Excludes reactions. Used for detecting delivery receipt changes.
-    public func messagesWithDeliveryChanges(afterTimestamp: Int64) throws -> [(message: Message, chatRowID: Int64)] {
+    public func maxDateRetracted() throws -> Int64 {
         try db.read { db in
-            let sql = """
-                SELECT m.*, cmj.chat_id
-                FROM message m
-                JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
-                WHERE m.date_delivered > ?
-                  AND m.is_from_me = 1
-                  AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000)
-                ORDER BY m.date_delivered ASC
-                """
-            let rows = try Row.fetchAll(db, sql: sql, arguments: [afterTimestamp])
-            return try rows.map { row in
-                let message = try Message(row: row)
-                let chatRowID: Int64 = row["chat_id"]
-                return (message: message, chatRowID: chatRowID)
-            }
+            try Int64.fetchOne(db, sql: "SELECT MAX(date_retracted) FROM message") ?? 0
         }
     }
+
+    public func maxDateRecovered() throws -> Int64 {
+        try db.read { db in
+            try Int64.fetchOne(db, sql: "SELECT MAX(date_recovered) FROM message") ?? 0
+        }
+    }
+
+    public func affectedChatRowIDs(
+        messageAfterRowID: Int64,
+        readChangedAfterTimestamp: Int64,
+        deliveryChangedAfterTimestamp: Int64,
+        editedChangedAfterTimestamp: Int64,
+        retractedChangedAfterTimestamp: Int64,
+        recoveredChangedAfterTimestamp: Int64
+    ) throws -> Set<Int64> {
+        try db.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT DISTINCT cmj.chat_id
+                    FROM chat_message_join cmj
+                    JOIN message m ON m.ROWID = cmj.message_id
+                    WHERE m.ROWID > ?
+                       OR m.date_read > ?
+                       OR m.date_delivered > ?
+                       OR m.date_edited > ?
+                       OR m.date_retracted > ?
+                       OR m.date_recovered > ?
+                    """,
+                arguments: [
+                    messageAfterRowID,
+                    readChangedAfterTimestamp,
+                    deliveryChangedAfterTimestamp,
+                    editedChangedAfterTimestamp,
+                    retractedChangedAfterTimestamp,
+                    recoveredChangedAfterTimestamp,
+                ]
+            )
+
+            return Set(rows.map { row in
+                let chatRowID: Int64 = row["chat_id"]
+                return chatRowID
+            })
+        }
+    }
+
 }
 
 // MARK: - Composite types
